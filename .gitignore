@@ -1,8 +1,6 @@
-# 忽略环境变量文件
+# Environments
 .env
 
-# 忽略作者-帖子映射文件
-author_threads.json
-
-# 忽略 Python 缓存
+# Python
 __pycache__/
+*.pyc
