@@ -14,8 +14,14 @@ intents.message_content = True
 intents.members = True
 intents.reactions = True
 
-# 创建一个客户端实例，并配置代理
-client = discord.Client(intents=intents, proxy="http://127.0.0.1:18888")
+# 根据环境变量决定是否使用代理
+proxy_url = os.getenv('HTTP_PROXY')
+if proxy_url:
+    print(f"检测到代理，将使用: {proxy_url}")
+    client = discord.Client(intents=intents, proxy=proxy_url)
+else:
+    print("未检测到代理，将直接连接")
+    client = discord.Client(intents=intents)
 
 # --- 作品精选功能配置 ---
 GALLERY_CHANNEL_NAME = "作品精选"
