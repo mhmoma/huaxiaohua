@@ -64,7 +64,6 @@ class Civitai(commands.Cog):
         msg = await ctx.send("正在分析您的搜索请求...")
 
         # --- 关键词标准化处理 ---
-        # 使用正则表达式，将所有逗号（中英文）和空格作为分隔符
         raw_parts = re.split(r'[,\s]+', query.replace('，', ','))
         query_parts = [part.strip().lower() for part in raw_parts if part.strip()]
         
@@ -74,7 +73,7 @@ class Civitai(commands.Cog):
             await msg.edit(content="**搜索失败!**\n您的搜索词只包含通用质量标签。请添加**具体的主题**，例如: `搜索 a girl, masterpiece`")
             return
         
-        final_query = ",".join(subject_parts) # 关键修复：使用英文逗号连接关键词
+        final_query = ",".join(subject_parts)
         
         is_nsfw_channel = isinstance(ctx.channel, discord.TextChannel) and ctx.channel.is_nsfw()
         contains_nsfw_keyword = any(keyword in query.lower() for keyword in NSFW_KEYWORDS)
@@ -90,8 +89,8 @@ class Civitai(commands.Cog):
         params = {
             "query": final_query,
             "limit": 30,
-            "sort": selected_sort, # 使用随机选择的排序方式
-            "nsfw": "Mature" if is_nsfw_channel else "None" # 修正为官方支持的 'Mature'
+            "sort": selected_sort,
+            "nsfw": "Mature" if is_nsfw_channel else "None"
         }
         
         data = await self.fetch_civitai_data(f"{self.base_url}/images", params=params)
@@ -106,23 +105,41 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，找到的图片都缺少详细的生成信息。")
             return
         
+        # --- 最终修复：弹性匹配机制 ---
         perfect_matches = []
+        scored_matches = []
         for img in valid_images:
             prompt_text = img['meta'].get('prompt', '').lower()
-            if all(keyword in prompt_text for keyword in subject_parts):
+            current_score = sum(1 for keyword in subject_parts if keyword in prompt_text)
+            
+            if current_score == len(subject_parts): # 100% 匹配
                 perfect_matches.append(img)
+            if current_score > 0: # 至少匹配一个关键词
+                scored_matches.append({'score': current_score, 'image': img})
 
-        if not perfect_matches:
-            await msg.edit(content=f"抱歉，找不到**同时包含**您所有关键词“{final_query}”的图片。请尝试减少或更换关键词。")
-            return
+        image_data = None
+        match_feedback = ""
+
+        if perfect_matches:
+            image_data = random.choice(perfect_matches)
+            match_feedback = "（完美匹配您的所有关键词）"
+        elif scored_matches:
+            # 如果没有完美匹配，则从匹配度最高的图片中选择
+            scored_matches.sort(key=lambda x: x['score'], reverse=True)
+            highest_score = scored_matches[0]['score']
+            top_scorers = [item['image'] for item in scored_matches if item['score'] == highest_score]
+            image_data = random.choice(top_scorers)
+            match_feedback = f"（匹配到 {highest_score}/{len(subject_parts)} 个关键词）"
         
-        image_data = random.choice(perfect_matches)
+        if not image_data:
+            await msg.edit(content=f"抱歉，找不到与您的关键词“{final_query}”相关的图片。请尝试减少或更换关键词。")
+            return
         
         await msg.edit(content="正在下载图片以便显示...")
         image_bytes = await self.download_image(image_data["url"])
 
         image_page_url = f"https://civitai.com/images/{image_data['id']}"
-        embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
+        embed = discord.Embed(title=f"Civitai 图片搜索结果 {match_feedback}", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
         
         meta = image_data.get("meta")
         embed.add_field(name="✅ 正面提示词 (Prompt)", value=f"```{format_meta_field(meta, 'prompt')}```", inline=False)
