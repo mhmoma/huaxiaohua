@@ -45,14 +45,14 @@ class Civitai(commands.Cog):
                 return None
 
     async def download_image(self, url):
-        """Downloads an image from a URL and returns it as bytes."""
+        """从 URL 下载图片并返回其字节数据"""
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, timeout=30.0)
                 response.raise_for_status()
                 return response.content
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            print(f"[ERROR] Failed to download image from {url}: {e}")
+            print(f"[ERROR] 从 {url} 下载图片失败: {e}")
             return None
 
     @commands.command(name='搜索')
@@ -78,70 +78,82 @@ class Civitai(commands.Cog):
 
         await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”进行搜索，请稍候...")
 
-        params = {"query": final_query, "limit": 30, "sort": "Most Reactions", "nsfw": "None"}
-        if is_nsfw_channel:
-            params["nsfw"] = "X"
-
-        data = await self.fetch_civitai_data(f"{self.base_url}/images", params=params)
-
-        if not data or not data.get("items"):
+        # --- 最终修复：随机页面搜索 ---
+        # 1. 先发一个请求获取总页数
+        meta_params = {"query": final_query, "limit": 1, "nsfw": "X" if is_nsfw_channel else "None"}
+        meta_data = await self.fetch_civitai_data(f"{self.base_url}/images", params=meta_params)
+        
+        if not meta_data or 'metadata' not in meta_data or 'totalPages' not in meta_data['metadata']:
+            await msg.edit(content="抱歉，无法获取搜索结果的总页数，请稍后再试。")
+            return
+            
+        total_pages = meta_data['metadata']['totalPages']
+        if total_pages == 0:
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
-        # --- 最终修复：100% 关键词匹配 ---
+        # 2. 随机选择一页
+        # 限制最大页数以避免结果质量过低
+        max_page_to_search = min(total_pages, 50) 
+        random_page = random.randint(1, max_page_to_search)
+        
+        await msg.edit(content=f"正在从 **{total_pages}** 页结果中随机抽取第 **{random_page}** 页进行搜索...")
+
+        # 3. 获取随机页面的数据
+        params = {"query": final_query, "limit": 30, "sort": "Most Reactions", "page": random_page, "nsfw": "X" if is_nsfw_channel else "None"}
+        data = await self.fetch_civitai_data(f"{self.base_url}/images", params=params)
+
+        if not data or not data.get("items"):
+            await msg.edit(content="抱歉，在随机页面上没有找到图片。这可能是个小概率事件，请重试。")
+            return
+
+        valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
+
+        if not valid_images:
+            await msg.edit(content="抱歉，此页的图片都缺少详细的生成信息。请重试以获取新的一页。")
+            return
+
         perfect_matches = []
-        for img in data.get("items", []):
-            if not (img.get("url") and img.get("meta") and 'prompt' in img.get("meta")):
-                continue
+        for img in valid_images:
             prompt_text = img['meta'].get('prompt', '').lower()
             if all(keyword in prompt_text for keyword in subject_parts):
                 perfect_matches.append(img)
 
         if not perfect_matches:
-            await msg.edit(content=f"抱歉，找不到**同时包含**您所有关键词“{final_query}”的图片。请尝试减少或更换关键词。")
+            await msg.edit(content=f"抱歉，在此页找不到**同时包含**您所有关键词“{final_query}”的图片。请重试以获取新的一页。")
             return
         
         image_data = random.choice(perfect_matches)
         
-        # --- 下载图片并作为附件发送 ---
         await msg.edit(content="正在下载图片以便显示...")
         image_bytes = await self.download_image(image_data["url"])
 
+        image_page_url = f"https://civitai.com/images/{image_data['id']}"
+        embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
+        
+        meta = image_data.get("meta")
+        embed.add_field(name="✅ 正面提示词 (Prompt)", value=f"```{format_meta_field(meta, 'prompt')}```", inline=False)
+        embed.add_field(name="❌ 负面提示词 (Negative Prompt)", value=f"```{format_meta_field(meta, 'negativePrompt')}```", inline=False)
+        col1 = [f"**模型:** {format_meta_field(meta, 'Model')}", f"**采样器:** {format_meta_field(meta, 'sampler')}", f"**步数:** {format_meta_field(meta, 'steps')}"]
+        col2 = [f"**CFG Scale:** {format_meta_field(meta, 'cfgScale')}", f"**种子 (Seed):** {format_meta_field(meta, 'seed')}"]
+        if 'hashes' in meta and 'model' in meta['hashes']:
+             col2.append(f"**模型哈希:** {meta['hashes']['model']}")
+        embed.add_field(name="⚙️ 参数 1", value="\n".join(col1), inline=True)
+        embed.add_field(name="⚙️ 参数 2", value="\n".join(col2), inline=True)
+        if meta.get("lora"):
+            embed.add_field(name="🧩 LoRA", value="\n".join([f"- {lora}" for lora in meta["lora"]]), inline=False)
+        embed.set_footer(text=f"由 {image_data.get('username', '未知作者')} 创建 | ⚡️ Civitai")
+
         if not image_bytes:
-            await msg.edit(content="抱歉，无法下载图片进行预览，但这里是它的信息：")
-            # Fallback to text-only embed
-            embed = discord.Embed(title="Civitai 图片搜索结果 (下载失败)", description=f"**原始链接:** [点击查看](https://civitai.com/images/{image_data['id']})", color=discord.Color.red())
+            await msg.edit(content="抱歉，无法下载图片进行预览，但这里是它的信息：", embed=embed)
         else:
             filename = os.path.basename(image_data["url"].split('?')[0])
             if not filename or '.' not in filename:
                 filename = "image.jpeg"
             
             picture = discord.File(io.BytesIO(image_bytes), filename=filename)
-            embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看](https://civitai.com/images/{image_data['id']})", color=discord.Color.blue())
-            embed.set_image(url=f"attachment://{filename}")
-
-        meta = image_data.get("meta")
-        
-        embed.add_field(name="✅ 正面提示词 (Prompt)", value=f"```{format_meta_field(meta, 'prompt')}```", inline=False)
-        embed.add_field(name="❌ 负面提示词 (Negative Prompt)", value=f"```{format_meta_field(meta, 'negativePrompt')}```", inline=False)
-        
-        col1 = [f"**模型:** {format_meta_field(meta, 'Model')}", f"**采样器:** {format_meta_field(meta, 'sampler')}", f"**步数:** {format_meta_field(meta, 'steps')}"]
-        col2 = [f"**CFG Scale:** {format_meta_field(meta, 'cfgScale')}", f"**种子 (Seed):** {format_meta_field(meta, 'seed')}"]
-        if 'hashes' in meta and 'model' in meta['hashes']:
-             col2.append(f"**模型哈希:** {meta['hashes']['model']}")
-
-        embed.add_field(name="⚙️ 参数 1", value="\n".join(col1), inline=True)
-        embed.add_field(name="⚙️ 参数 2", value="\n".join(col2), inline=True)
-
-        if meta.get("lora"):
-            embed.add_field(name="🧩 LoRA", value="\n".join([f"- {lora}" for lora in meta["lora"]]), inline=False)
-        
-        embed.set_footer(text=f"由 {image_data.get('username', '未知作者')} 创建 | ⚡️ Civitai")
-
-        if 'picture' in locals():
-            await msg.edit(content="", embed=embed, attachments=[picture])
-        else:
-            await msg.edit(content="", embed=embed)
+            await ctx.send(embed=embed, file=picture)
+            await msg.delete()
 
 async def setup(bot):
     await bot.add_cog(Civitai(bot))
