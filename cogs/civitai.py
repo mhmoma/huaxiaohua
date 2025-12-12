@@ -34,7 +34,7 @@ class Civitai(commands.Cog):
         self.bot = bot
         self.api_key = os.getenv("CIVITAI_API_KEY")
         self.base_url = "https://civitai.com/api/v1"
-        self.translator = Translator()
+        # 移除启动时初始化，避免启动崩溃
 
     async def fetch_civitai_data(self, url, params=None):
         headers = {}
@@ -55,15 +55,17 @@ class Civitai(commands.Cog):
         """根据文本描述从 Civitai 搜索图片，并自动翻译中文"""
         msg = await ctx.send("正在分析您的搜索请求...")
 
-        # --- 自动翻译 ---
+        # --- 健壮的自动翻译 (带错误处理和惰性加载) ---
         translated_query = query
         if contains_chinese(query):
             try:
                 await msg.edit(content="检测到中文，正在翻译...")
-                translated = self.translator.translate(query, dest='en')
+                translator = Translator() # 惰性加载
+                translated = translator.translate(query, dest='en')
                 translated_query = translated.text
             except Exception as e:
-                await msg.edit(content=f"翻译时出错: {e}\n将尝试使用原始中文进行搜索。")
+                print(f"[ERROR] 翻译失败: {e}")
+                await msg.edit(content=f"翻译时出错，将尝试使用原始中文进行搜索。")
         
         query_parts = [part.strip().lower() for part in translated_query.replace(',', ' ').split()]
         subject_parts = [part for part in query_parts if part not in QUALITY_TAGS and part]
