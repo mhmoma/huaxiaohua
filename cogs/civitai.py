@@ -65,7 +65,7 @@ class Civitai(commands.Cog):
 
         await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”进行搜索，请稍候...")
 
-        params = {"query": final_query, "limit": 20, "sort": "Most Reactions", "nsfw": "None"}
+        params = {"query": final_query, "limit": 30, "sort": "Most Reactions", "nsfw": "None"} # 获取更多结果用于筛选
         if is_nsfw_channel:
             params["nsfw"] = "X"
 
@@ -75,32 +75,39 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
-        image_data = random.choice(data["items"])
+        # --- 结果预筛选 ---
+        valid_images = [
+            img for img in data.get("items", [])
+            if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")
+        ]
+
+        if not valid_images:
+            await msg.edit(content="抱歉，找到了相关的图片，但它们都缺少详细的生成信息。请尝试其他关键词。")
+            return
+
+        image_data = random.choice(valid_images)
         
         image_page_url = f"https://civitai.com/images/{image_data['id']}"
         embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
         
-        if image_data.get("url"):
-            embed.set_image(url=image_data["url"])
+        embed.set_image(url=image_data["url"])
 
         meta = image_data.get("meta")
-        if meta:
-            embed.add_field(name="✅ 正面提示词 (Prompt)", value=f"```{self.format_meta_field(meta, 'prompt')}```", inline=False)
-            embed.add_field(name="❌ 负面提示词 (Negative Prompt)", value=f"```{self.format_meta_field(meta, 'negativePrompt')}```", inline=False)
-            
-            col1 = [f"**模型:** {self.format_meta_field(meta, 'Model')}", f"**采样器:** {self.format_meta_field(meta, 'sampler')}", f"**步数:** {self.format_meta_field(meta, 'steps')}"]
-            col2 = [f"**CFG Scale:** {self.format_meta_field(meta, 'cfgScale')}", f"**种子 (Seed):** {self.format_meta_field(meta, 'seed')}"]
-            if 'hashes' in meta and 'model' in meta['hashes']:
-                 col2.append(f"**模型哈希:** {meta['hashes']['model']}")
+        
+        embed.add_field(name="✅ 正面提示词 (Prompt)", value=f"```{self.format_meta_field(meta, 'prompt')}```", inline=False)
+        embed.add_field(name="❌ 负面提示词 (Negative Prompt)", value=f"```{self.format_meta_field(meta, 'negativePrompt')}```", inline=False)
+        
+        col1 = [f"**模型:** {self.format_meta_field(meta, 'Model')}", f"**采样器:** {self.format_meta_field(meta, 'sampler')}", f"**步数:** {self.format_meta_field(meta, 'steps')}"]
+        col2 = [f"**CFG Scale:** {self.format_meta_field(meta, 'cfgScale')}", f"**种子 (Seed):** {self.format_meta_field(meta, 'seed')}"]
+        if 'hashes' in meta and 'model' in meta['hashes']:
+             col2.append(f"**模型哈希:** {meta['hashes']['model']}")
 
-            embed.add_field(name="⚙️ 参数 1", value="\n".join(col1), inline=True)
-            embed.add_field(name="⚙️ 参数 2", value="\n".join(col2), inline=True)
+        embed.add_field(name="⚙️ 参数 1", value="\n".join(col1), inline=True)
+        embed.add_field(name="⚙️ 参数 2", value="\n".join(col2), inline=True)
 
-            if meta.get("lora"):
-                embed.add_field(name="🧩 LoRA", value="\n".join([f"- {lora}" for lora in meta["lora"]]), inline=False)
-        else:
-            embed.add_field(name="提示词信息", value="这张图片没有包含详细的生成信息。", inline=False)
-
+        if meta.get("lora"):
+            embed.add_field(name="🧩 LoRA", value="\n".join([f"- {lora}" for lora in meta["lora"]]), inline=False)
+        
         embed.set_footer(text=f"由 {image_data.get('username', '未知作者')} 创建 | ⚡️ Civitai")
 
         await msg.edit(content="", embed=embed)
