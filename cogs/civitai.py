@@ -24,7 +24,6 @@ class Civitai(commands.Cog):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         
-        # 已移除所有代理和SSL验证逻辑，适配云端部署
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(url, params=params, headers=headers, timeout=30.0)
@@ -65,7 +64,7 @@ class Civitai(commands.Cog):
 
         await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”进行搜索，请稍候...")
 
-        params = {"query": final_query, "limit": 30, "sort": "Most Reactions", "nsfw": "None"} # 获取更多结果用于筛选
+        params = {"query": final_query, "limit": 30, "sort": "Most Reactions", "nsfw": "None"}
         if is_nsfw_channel:
             params["nsfw"] = "X"
 
@@ -75,17 +74,32 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
-        # --- 结果预筛选 ---
-        valid_images = [
-            img for img in data.get("items", [])
-            if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")
-        ]
+        # --- 结果预筛选和相关度排序 ---
+        valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
 
         if not valid_images:
             await msg.edit(content="抱歉，找到了相关的图片，但它们都缺少详细的生成信息。请尝试其他关键词。")
             return
 
-        image_data = random.choice(valid_images)
+        scored_images = []
+        for img in valid_images:
+            prompt_text = img['meta'].get('prompt', '').lower()
+            score = 0
+            for keyword in subject_parts:
+                if keyword in prompt_text:
+                    score += 1
+            if score > 0:
+                scored_images.append({'score': score, 'image': img})
+
+        if not scored_images:
+            await msg.edit(content=f"抱歉，虽然找到了图片，但它们的提示词与您的关键词“{final_query}”匹配度不高。")
+            return
+
+        scored_images.sort(key=lambda x: x['score'], reverse=True)
+        
+        top_n = 5
+        best_images = [item['image'] for item in scored_images[:top_n]]
+        image_data = random.choice(best_images)
         
         image_page_url = f"https://civitai.com/images/{image_data['id']}"
         embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
