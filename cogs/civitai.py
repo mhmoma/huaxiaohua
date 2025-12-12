@@ -64,6 +64,7 @@ class Civitai(commands.Cog):
         msg = await ctx.send("正在分析您的搜索请求...")
 
         # --- 关键词标准化处理 ---
+        # 使用正则表达式，将所有逗号（中英文）和空格作为分隔符
         raw_parts = re.split(r'[,\s]+', query.replace('，', ','))
         query_parts = [part.strip().lower() for part in raw_parts if part.strip()]
         
@@ -73,7 +74,7 @@ class Civitai(commands.Cog):
             await msg.edit(content="**搜索失败!**\n您的搜索词只包含通用质量标签。请添加**具体的主题**，例如: `搜索 a girl, masterpiece`")
             return
         
-        final_query = " ".join(subject_parts)
+        final_query = ",".join(subject_parts) # 关键修复：使用英文逗号连接关键词
         
         is_nsfw_channel = isinstance(ctx.channel, discord.TextChannel) and ctx.channel.is_nsfw()
         contains_nsfw_keyword = any(keyword in query.lower() for keyword in NSFW_KEYWORDS)
