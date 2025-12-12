@@ -6,7 +6,6 @@ import random
 import json
 import re
 import io
-# from urllib.parse import quote_plus # 移除不必要的导入
 
 # 敏感词检测列表
 NSFW_KEYWORDS = ["nude", "naked", "nsfw", "裸体", "裸", "色情", "r18"]
@@ -15,6 +14,9 @@ QUALITY_TAGS = [
     "photorealistic", "highly detailed", "realistic", "highres",
     "absurdres", "best_quality", "ultra_detailed",
 ]
+
+# Civitai API 支持的排序方式
+SUPPORTED_SORTS = ["Newest", "Most Reactions", "Most Downloads", "Most Comments"]
 
 def format_meta_field(meta, field_name, max_length=1000):
     """安全地从 meta 字典中提取并格式化字段"""
@@ -61,10 +63,9 @@ class Civitai(commands.Cog):
         """根据文本描述从 Civitai 搜索图片"""
         msg = await ctx.send("正在分析您的搜索请求...")
 
-        # --- 最终修复：标准化关键词处理 (使用空格连接) ---
-        # 将所有逗号替换为空格，然后分割，去除空字符串
-        processed_query = ' '.join([part.strip() for part in query.replace('，', ' ').split(' ') if part.strip()])
-        query_parts = [part.strip().lower() for part in processed_query.split(' ')]
+        # --- 关键词标准化处理 ---
+        raw_parts = re.split(r'[,\s]+', query.replace('，', ','))
+        query_parts = [part.strip().lower() for part in raw_parts if part.strip()]
         
         subject_parts = [part for part in query_parts if part not in QUALITY_TAGS and part]
         
@@ -72,7 +73,7 @@ class Civitai(commands.Cog):
             await msg.edit(content="**搜索失败!**\n您的搜索词只包含通用质量标签。请添加**具体的主题**，例如: `搜索 a girl, masterpiece`")
             return
         
-        final_query = " ".join(subject_parts) # 使用空格连接
+        final_query = " ".join(subject_parts)
         
         is_nsfw_channel = isinstance(ctx.channel, discord.TextChannel) and ctx.channel.is_nsfw()
         contains_nsfw_keyword = any(keyword in query.lower() for keyword in NSFW_KEYWORDS)
@@ -81,14 +82,15 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，请在年龄限制频道（NSFW）中使用包含敏感词的搜索。")
             return
 
-        await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”按**相关度**进行搜索，请稍候...")
+        # --- 随机选择排序方式 ---
+        selected_sort = random.choice(SUPPORTED_SORTS)
+        await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”按**{selected_sort}**进行搜索，请稍候...")
 
         params = {
             "query": final_query,
             "limit": 30,
-            "sort": "Relevancy",
-            "period": "AllTime",
-            "nsfw": "X" if is_nsfw_channel else "None"
+            "sort": selected_sort, # 使用随机选择的排序方式
+            "nsfw": "Mature" if is_nsfw_channel else "None" # 修正为官方支持的 'Mature'
         }
         
         data = await self.fetch_civitai_data(f"{self.base_url}/images", params=params)
@@ -100,10 +102,20 @@ class Civitai(commands.Cog):
         valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
 
         if not valid_images:
-            await msg.edit(content="抱歉，相关度最高的图片都缺少详细的生成信息。")
+            await msg.edit(content="抱歉，找到的图片都缺少详细的生成信息。")
             return
         
-        image_data = random.choice(valid_images)
+        perfect_matches = []
+        for img in valid_images:
+            prompt_text = img['meta'].get('prompt', '').lower()
+            if all(keyword in prompt_text for keyword in subject_parts):
+                perfect_matches.append(img)
+
+        if not perfect_matches:
+            await msg.edit(content=f"抱歉，找不到**同时包含**您所有关键词“{final_query}”的图片。请尝试减少或更换关键词。")
+            return
+        
+        image_data = random.choice(perfect_matches)
         
         await msg.edit(content="正在下载图片以便显示...")
         image_bytes = await self.download_image(image_data["url"])
