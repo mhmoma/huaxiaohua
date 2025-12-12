@@ -17,8 +17,8 @@ QUALITY_TAGS = [
 
 # Civitai API 支持的排序方式 (根据文档更新)
 SUPPORTED_SORTS = ["Newest", "Most Reactions", "Most Downloads", "Most Comments"]
-# Civitai API 支持的时间范围 (根据文档新增)
-SUPPORTED_PERIODS = ["AllTime", "Year", "Month", "Week", "Day"]
+# Civitai API 支持的时间范围 (根据文档新增，并移除 Day 和 Week)
+SUPPORTED_PERIODS = ["AllTime", "Year", "Month"]
 
 def format_meta_field(meta, field_name, max_length=1000):
     """安全地从 meta 字典中提取并格式化字段"""
@@ -86,56 +86,30 @@ class Civitai(commands.Cog):
 
         # --- 随机选择排序方式和时间范围 ---
         selected_sort = random.choice(SUPPORTED_SORTS)
-        selected_period = random.choice(SUPPORTED_PERIODS)
+        selected_period = random.choice(SUPPORTED_PERIODS) # 从更稳定的时间范围中选择
         await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”按**{selected_sort}**排序，时间范围**{selected_period}**进行搜索，请稍候...")
 
-        # 1. 先发一个请求获取总页数
-        meta_params = {
-            "query": final_query,
-            "limit": 1,
-            "sort": selected_sort,
-            "period": selected_period,
-            "nsfw": "Mature" if is_nsfw_channel else "None"
-        }
-        meta_data = await self.fetch_civitai_data(f"{self.base_url}/images", params=meta_params)
-        
-        if not meta_data or 'metadata' not in meta_data or 'totalPages' not in meta_data['metadata']:
-            await msg.edit(content="抱歉，无法获取搜索结果的总页数，请稍后再试。")
-            return
-            
-        total_pages = meta_data['metadata']['totalPages']
-        if total_pages == 0:
-            await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
-            return
-
-        # 2. 随机选择一页
-        # 限制最大页数以避免结果质量过低
-        max_page_to_search = min(total_pages, 50) # 限制在50页以内，避免搜索太深导致质量下降
-        random_page = random.randint(1, max_page_to_search)
-        
-        await msg.edit(content=f"正在从 **{total_pages}** 页结果中随机抽取第 **{random_page}** 页进行搜索...")
-
-        # 3. 获取随机页面的数据
+        # --- 最终修复：直接获取第一页结果，不再获取总页数 ---
         params = {
             "query": final_query,
             "limit": 30,
             "sort": selected_sort,
             "period": selected_period,
-            "page": random_page, # 使用随机选择的页面
             "nsfw": "Mature" if is_nsfw_channel else "None"
         }
+        
         data = await self.fetch_civitai_data(f"{self.base_url}/images", params=params)
 
         if not data or not data.get("items"):
-            await msg.edit(content="抱歉，在随机页面上没有找到图片。这可能是个小概率事件，请重试。")
+            await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
         valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
 
         if not valid_images:
-            await msg.edit(content="抱歉，此页的图片都缺少详细的生成信息。请重试以获取新的一页。")
+            await msg.edit(content="抱歉，找到的图片都缺少详细的生成信息。")
             return
-
+        
         # --- 最终修复：更宽松的匹配机制 ---
         loose_matches = []
         for img in valid_images:
