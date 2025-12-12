@@ -5,7 +5,6 @@ import os
 import random
 import json
 import re
-from googletrans import Translator
 
 # 敏感词检测列表
 NSFW_KEYWORDS = ["nude", "naked", "nsfw", "裸体", "裸", "色情", "r18"]
@@ -14,11 +13,6 @@ QUALITY_TAGS = [
     "photorealistic", "highly detailed", "realistic", "highres",
     "absurdres", "best_quality", "ultra_detailed",
 ]
-
-# --- 辅助函数 ---
-def contains_chinese(text):
-    """检查字符串是否包含中文字符"""
-    return re.search(r'[\u4e00-\u9fff]', text)
 
 def format_meta_field(meta, field_name, max_length=1000):
     """安全地从 meta 字典中提取并格式化字段"""
@@ -34,7 +28,6 @@ class Civitai(commands.Cog):
         self.bot = bot
         self.api_key = os.getenv("CIVITAI_API_KEY")
         self.base_url = "https://civitai.com/api/v1"
-        # 移除启动时初始化，避免启动崩溃
 
     async def fetch_civitai_data(self, url, params=None):
         headers = {}
@@ -52,22 +45,10 @@ class Civitai(commands.Cog):
 
     @commands.command(name='搜索')
     async def search_image(self, ctx, *, query: str):
-        """根据文本描述从 Civitai 搜索图片，并自动翻译中文"""
+        """根据文本描述从 Civitai 搜索图片"""
         msg = await ctx.send("正在分析您的搜索请求...")
 
-        # --- 健壮的自动翻译 (带错误处理和惰性加载) ---
-        translated_query = query
-        if contains_chinese(query):
-            try:
-                await msg.edit(content="检测到中文，正在翻译...")
-                translator = Translator() # 惰性加载
-                translated = translator.translate(query, dest='en')
-                translated_query = translated.text
-            except Exception as e:
-                print(f"[ERROR] 翻译失败: {e}")
-                await msg.edit(content=f"翻译时出错，将尝试使用原始中文进行搜索。")
-        
-        query_parts = [part.strip().lower() for part in translated_query.replace(',', ' ').split()]
+        query_parts = [part.strip().lower() for part in query.replace(',', ' ').split()]
         subject_parts = [part for part in query_parts if part not in QUALITY_TAGS and part]
         
         if not subject_parts:
@@ -77,13 +58,13 @@ class Civitai(commands.Cog):
         final_query = " ".join(subject_parts)
         
         is_nsfw_channel = isinstance(ctx.channel, discord.TextChannel) and ctx.channel.is_nsfw()
-        contains_nsfw_keyword = any(keyword in query.lower() or keyword in translated_query.lower() for keyword in NSFW_KEYWORDS)
+        contains_nsfw_keyword = any(keyword in query.lower() for keyword in NSFW_KEYWORDS)
 
         if contains_nsfw_keyword and not is_nsfw_channel:
             await msg.edit(content="抱歉，请在年龄限制频道（NSFW）中使用包含敏感词的搜索。")
             return
 
-        await msg.edit(content=f"正在使用关键词“**{final_query}**”进行搜索 (已翻译)，请稍候...")
+        await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”进行搜索，请稍候...")
 
         params = {"query": final_query, "limit": 30, "sort": "Most Reactions", "nsfw": "None"}
         if is_nsfw_channel:
