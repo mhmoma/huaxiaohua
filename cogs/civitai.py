@@ -74,32 +74,32 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
-        # --- 结果预筛选和相关度排序 ---
         valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
 
         if not valid_images:
             await msg.edit(content="抱歉，找到了相关的图片，但它们都缺少详细的生成信息。请尝试其他关键词。")
             return
 
+        # --- 最终修复：匹配度阈值筛选 ---
         scored_images = []
         for img in valid_images:
             prompt_text = img['meta'].get('prompt', '').lower()
-            score = 0
-            for keyword in subject_parts:
-                if keyword in prompt_text:
-                    score += 1
-            if score > 0:
-                scored_images.append({'score': score, 'image': img})
-
-        if not scored_images:
-            await msg.edit(content=f"抱歉，虽然找到了图片，但它们的提示词与您的关键词“{final_query}”匹配度不高。")
-            return
+            score = sum(1 for keyword in subject_parts if keyword in prompt_text)
+            scored_images.append({'score': score, 'image': img})
 
         scored_images.sort(key=lambda x: x['score'], reverse=True)
+
+        highest_score = scored_images[0]['score']
+        match_threshold = 0.5  # 至少要匹配50%的关键词
+
+        # 如果关键词大于1个，且最高分也无法满足阈值，则认为匹配失败
+        if len(subject_parts) > 1 and (highest_score / len(subject_parts)) < match_threshold:
+            await msg.edit(content=f"抱歉，找不到与您的关键词“{final_query}”高度匹配的图片。")
+            return
         
-        top_n = 5
-        best_images = [item['image'] for item in scored_images[:top_n]]
-        image_data = random.choice(best_images)
+        # 从所有达到最高分的图片中随机选择
+        top_scorers = [item['image'] for item in scored_images if item['score'] == highest_score]
+        image_data = random.choice(top_scorers)
         
         image_page_url = f"https://civitai.com/images/{image_data['id']}"
         embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
