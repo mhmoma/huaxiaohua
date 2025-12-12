@@ -78,11 +78,12 @@ class Civitai(commands.Cog):
 
         await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”按**相关度**进行搜索，请稍候...")
 
-        # --- 最终修复：使用 'Relevancy' 排序 ---
+        # --- 最终修复：添加 period: 'AllTime' 参数 ---
         params = {
             "query": final_query,
-            "limit": 20, # 获取相关度最高的前20张图片
-            "sort": "Relevancy", 
+            "limit": 30,
+            "sort": "Relevancy",
+            "period": "AllTime", # 关键修复：确保搜索所有时间段，与网站行为一致
             "nsfw": "X" if is_nsfw_channel else "None"
         }
         
@@ -92,14 +93,12 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
-        # 筛选出包含元数据的结果
         valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
 
         if not valid_images:
             await msg.edit(content="抱歉，相关度最高的图片都缺少详细的生成信息。")
             return
         
-        # 从筛选后的结果中随机选择一张
         image_data = random.choice(valid_images)
         
         await msg.edit(content="正在下载图片以便显示...")
