@@ -105,41 +105,25 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，找到的图片都缺少详细的生成信息。")
             return
         
-        # --- 最终修复：弹性匹配机制 ---
-        perfect_matches = []
-        scored_matches = []
+        # --- 最终修复：更宽松的匹配机制 ---
+        loose_matches = []
         for img in valid_images:
             prompt_text = img['meta'].get('prompt', '').lower()
-            current_score = sum(1 for keyword in subject_parts if keyword in prompt_text)
-            
-            if current_score == len(subject_parts): # 100% 匹配
-                perfect_matches.append(img)
-            if current_score > 0: # 至少匹配一个关键词
-                scored_matches.append({'score': current_score, 'image': img})
+            # 只要提示词中包含任何一个关键词，就视为匹配
+            if any(keyword in prompt_text for keyword in subject_parts):
+                loose_matches.append(img)
 
-        image_data = None
-        match_feedback = ""
-
-        if perfect_matches:
-            image_data = random.choice(perfect_matches)
-            match_feedback = "（完美匹配您的所有关键词）"
-        elif scored_matches:
-            # 如果没有完美匹配，则从匹配度最高的图片中选择
-            scored_matches.sort(key=lambda x: x['score'], reverse=True)
-            highest_score = scored_matches[0]['score']
-            top_scorers = [item['image'] for item in scored_matches if item['score'] == highest_score]
-            image_data = random.choice(top_scorers)
-            match_feedback = f"（匹配到 {highest_score}/{len(subject_parts)} 个关键词）"
-        
-        if not image_data:
-            await msg.edit(content=f"抱歉，找不到与您的关键词“{final_query}”相关的图片。请尝试减少或更换关键词。")
+        if not loose_matches:
+            await msg.edit(content=f"抱歉，找不到任何包含您关键词“{final_query}”的图片。请尝试减少或更换关键词。")
             return
+        
+        image_data = random.choice(loose_matches) # 从所有宽松匹配的图片中随机选择一张
         
         await msg.edit(content="正在下载图片以便显示...")
         image_bytes = await self.download_image(image_data["url"])
 
         image_page_url = f"https://civitai.com/images/{image_data['id']}"
-        embed = discord.Embed(title=f"Civitai 图片搜索结果 {match_feedback}", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
+        embed = discord.Embed(title=f"Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
         
         meta = image_data.get("meta")
         embed.add_field(name="✅ 正面提示词 (Prompt)", value=f"```{format_meta_field(meta, 'prompt')}```", inline=False)
