@@ -1,5 +1,5 @@
 @echo off
-set REPO_URL=https://github.com/mhmoma/-.git
+set REPO_URL=https://github.com/mhmoma/huaxiaohua.git
 
 REM --- Git 操作 ---
 echo.
