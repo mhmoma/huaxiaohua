@@ -5,6 +5,7 @@ import os
 import random
 import json
 import re
+import io
 
 # 敏感词检测列表
 NSFW_KEYWORDS = ["nude", "naked", "nsfw", "裸体", "裸", "色情", "r18"]
@@ -43,6 +44,17 @@ class Civitai(commands.Cog):
                 print(f"[ERROR] Civitai API 请求失败: {e}")
                 return None
 
+    async def download_image(self, url):
+        """Downloads an image from a URL and returns it as bytes."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=30.0)
+                response.raise_for_status()
+                return response.content
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            print(f"[ERROR] Failed to download image from {url}: {e}")
+            return None
+
     @commands.command(name='搜索')
     async def search_image(self, ctx, *, query: str):
         """根据文本描述从 Civitai 搜索图片"""
@@ -76,17 +88,12 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
-        valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
-
-        if not valid_images:
-            await msg.edit(content="抱歉，找到了相关的图片，但它们都缺少详细的生成信息。请尝试其他关键词。")
-            return
-
         # --- 最终修复：100% 关键词匹配 ---
         perfect_matches = []
-        for img in valid_images:
+        for img in data.get("items", []):
+            if not (img.get("url") and img.get("meta") and 'prompt' in img.get("meta")):
+                continue
             prompt_text = img['meta'].get('prompt', '').lower()
-            # 检查是否所有关键词都在提示词中
             if all(keyword in prompt_text for keyword in subject_parts):
                 perfect_matches.append(img)
 
@@ -94,13 +101,24 @@ class Civitai(commands.Cog):
             await msg.edit(content=f"抱歉，找不到**同时包含**您所有关键词“{final_query}”的图片。请尝试减少或更换关键词。")
             return
         
-        # 从所有完美匹配的图片中随机选择一张
         image_data = random.choice(perfect_matches)
         
-        image_page_url = f"https://civitai.com/images/{image_data['id']}"
-        embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
-        
-        embed.set_image(url=image_data["url"])
+        # --- 下载图片并作为附件发送 ---
+        await msg.edit(content="正在下载图片以便显示...")
+        image_bytes = await self.download_image(image_data["url"])
+
+        if not image_bytes:
+            await msg.edit(content="抱歉，无法下载图片进行预览，但这里是它的信息：")
+            # Fallback to text-only embed
+            embed = discord.Embed(title="Civitai 图片搜索结果 (下载失败)", description=f"**原始链接:** [点击查看](https://civitai.com/images/{image_data['id']})", color=discord.Color.red())
+        else:
+            filename = os.path.basename(image_data["url"].split('?')[0])
+            if not filename or '.' not in filename:
+                filename = "image.jpeg"
+            
+            picture = discord.File(io.BytesIO(image_bytes), filename=filename)
+            embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看](https://civitai.com/images/{image_data['id']})", color=discord.Color.blue())
+            embed.set_image(url=f"attachment://{filename}")
 
         meta = image_data.get("meta")
         
@@ -120,7 +138,10 @@ class Civitai(commands.Cog):
         
         embed.set_footer(text=f"由 {image_data.get('username', '未知作者')} 创建 | ⚡️ Civitai")
 
-        await msg.edit(content="", embed=embed)
+        if 'picture' in locals():
+            await msg.edit(content="", embed=embed, attachments=[picture])
+        else:
+            await msg.edit(content="", embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Civitai(bot))
