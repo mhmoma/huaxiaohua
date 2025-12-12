@@ -6,6 +6,7 @@ import random
 import json
 import re
 import io
+from urllib.parse import quote_plus # 导入URL编码函数
 
 # 敏感词检测列表
 NSFW_KEYWORDS = ["nude", "naked", "nsfw", "裸体", "裸", "色情", "r18"]
@@ -60,14 +61,18 @@ class Civitai(commands.Cog):
         """根据文本描述从 Civitai 搜索图片"""
         msg = await ctx.send("正在分析您的搜索请求...")
 
-        query_parts = [part.strip().lower() for part in query.replace(',', ' ').split()]
+        # --- 最终修复：标准化关键词处理 ---
+        # 将所有逗号替换为英文逗号，然后分割，去除空字符串
+        processed_query = ','.join([part.strip() for part in query.replace('，', ',').split(',') if part.strip()])
+        query_parts = [part.strip().lower() for part in processed_query.split(',')]
+        
         subject_parts = [part for part in query_parts if part not in QUALITY_TAGS and part]
         
         if not subject_parts:
             await msg.edit(content="**搜索失败!**\n您的搜索词只包含通用质量标签。请添加**具体的主题**，例如: `搜索 a girl, masterpiece`")
             return
         
-        final_query = " ".join(subject_parts)
+        final_query = ",".join(subject_parts) # 使用英文逗号连接
         
         is_nsfw_channel = isinstance(ctx.channel, discord.TextChannel) and ctx.channel.is_nsfw()
         contains_nsfw_keyword = any(keyword in query.lower() for keyword in NSFW_KEYWORDS)
@@ -78,12 +83,11 @@ class Civitai(commands.Cog):
 
         await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”按**相关度**进行搜索，请稍候...")
 
-        # --- 最终修复：添加 period: 'AllTime' 参数 ---
         params = {
             "query": final_query,
             "limit": 30,
             "sort": "Relevancy",
-            "period": "AllTime", # 关键修复：确保搜索所有时间段，与网站行为一致
+            "period": "AllTime",
             "nsfw": "X" if is_nsfw_channel else "None"
         }
         
@@ -113,7 +117,7 @@ class Civitai(commands.Cog):
         col1 = [f"**模型:** {format_meta_field(meta, 'Model')}", f"**采样器:** {format_meta_field(meta, 'sampler')}", f"**步数:** {format_meta_field(meta, 'steps')}"]
         col2 = [f"**CFG Scale:** {format_meta_field(meta, 'cfgScale')}", f"**种子 (Seed):** {format_meta_field(meta, 'seed')}"]
         if 'hashes' in meta and 'model' in meta['hashes']:
-             col2.append(f"**模型哈希:** {meta['hashes']['model']}")
+             col2.append(f"**模型哈希:** {format_meta_field(meta['hashes'], 'model')}") # 修正这里
         embed.add_field(name="⚙️ 参数 1", value="\n".join(col1), inline=True)
         embed.add_field(name="⚙️ 参数 2", value="\n".join(col2), inline=True)
         if meta.get("lora"):
