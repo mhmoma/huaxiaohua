@@ -82,23 +82,20 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，找到了相关的图片，但它们都缺少详细的生成信息。请尝试其他关键词。")
             return
 
-        scored_images = []
+        # --- 最终修复：100% 关键词匹配 ---
+        perfect_matches = []
         for img in valid_images:
             prompt_text = img['meta'].get('prompt', '').lower()
-            score = sum(1 for keyword in subject_parts if keyword in prompt_text)
-            scored_images.append({'score': score, 'image': img})
+            # 检查是否所有关键词都在提示词中
+            if all(keyword in prompt_text for keyword in subject_parts):
+                perfect_matches.append(img)
 
-        scored_images.sort(key=lambda x: x['score'], reverse=True)
-
-        highest_score = scored_images[0]['score']
-        match_threshold = 0.5
-
-        if len(subject_parts) > 1 and (highest_score / len(subject_parts)) < match_threshold:
-            await msg.edit(content=f"抱歉，找不到与您的关键词“{final_query}”高度匹配的图片。")
+        if not perfect_matches:
+            await msg.edit(content=f"抱歉，找不到**同时包含**您所有关键词“{final_query}”的图片。请尝试减少或更换关键词。")
             return
         
-        top_scorers = [item['image'] for item in scored_images if item['score'] == highest_score]
-        image_data = random.choice(top_scorers)
+        # 从所有完美匹配的图片中随机选择一张
+        image_data = random.choice(perfect_matches)
         
         image_page_url = f"https://civitai.com/images/{image_data['id']}"
         embed = discord.Embed(title="Civitai 图片搜索结果", description=f"**原始链接:** [点击查看]({image_page_url})", color=discord.Color.blue())
