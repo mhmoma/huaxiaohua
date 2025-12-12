@@ -76,13 +76,13 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，请在年龄限制频道（NSFW）中使用包含敏感词的搜索。")
             return
 
-        await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”进行搜索，请稍候...")
+        await msg.edit(content=f"正在使用优化后的关键词“**{final_query}**”按**相关度**进行搜索，请稍候...")
 
-        # --- 最终修复：使用 'Newest' 排序以保证稳定性和新颖性 ---
+        # --- 最终修复：使用 'Relevancy' 排序 ---
         params = {
             "query": final_query,
-            "limit": 100, # 获取足够多的最新图片以进行筛选
-            "sort": "Newest", 
+            "limit": 20, # 获取相关度最高的前20张图片
+            "sort": "Relevancy", 
             "nsfw": "X" if is_nsfw_channel else "None"
         }
         
@@ -92,23 +92,15 @@ class Civitai(commands.Cog):
             await msg.edit(content="抱歉，没有找到相关的图片。请尝试更换关键词。")
             return
 
+        # 筛选出包含元数据的结果
         valid_images = [img for img in data.get("items", []) if img.get("url") and img.get("meta") and 'prompt' in img.get("meta")]
 
         if not valid_images:
-            await msg.edit(content="抱歉，最新的图片都缺少详细的生成信息。请稍后再试。")
-            return
-
-        perfect_matches = []
-        for img in valid_images:
-            prompt_text = img['meta'].get('prompt', '').lower()
-            if all(keyword in prompt_text for keyword in subject_parts):
-                perfect_matches.append(img)
-
-        if not perfect_matches:
-            await msg.edit(content=f"抱歉，在最新的图片中找不到**同时包含**您所有关键词“{final_query}”的图片。")
+            await msg.edit(content="抱歉，相关度最高的图片都缺少详细的生成信息。")
             return
         
-        image_data = random.choice(perfect_matches)
+        # 从筛选后的结果中随机选择一张
+        image_data = random.choice(valid_images)
         
         await msg.edit(content="正在下载图片以便显示...")
         image_bytes = await self.download_image(image_data["url"])
